@@ -12,19 +12,20 @@
 #include "c_kzg.h"
 
 #define BENCH_BASELINE  1
+#define BENCH_AFFINE    2
 
 // 32K * 32 bytes = 1 MB worth of data.
 const uint64_t MAX_FRS = 32 * 1024;
 
 // The time stats.
 typedef struct {
-    long data_bytes;
-    long polynomial_len;
-    long interpolate_time;
-    long commit_time;
-    long eval_time;
-    long compute_proof_time;
-    long check_proof_time;
+    unsigned long data_bytes;
+    unsigned long polynomial_len;
+    unsigned long interpolate_time;
+    unsigned long commit_time;
+    unsigned long eval_time;
+    unsigned long compute_proof_time;
+    unsigned long check_proof_time;
 } run_time_t;
 
 /**
@@ -161,6 +162,60 @@ void run_bench_baseline(
     free_fft_settings(&fs);
 }
 
+/*
+ * Runs the benchmark for g1 -> affine transformation.
+ *
+ * @param[out] run_time             Run time (usec)
+ * @param[in]  data                 Polynomial eval
+ * @param[in]  scale                log of polynomial length(1 more than the polynomial degree)
+ * @param[in]  max_seconds          Test duration
+*/
+void run_bench_affine_transformation(
+    unsigned long* run_time,
+    const g1_t *p,
+    poly *poly,
+    const uint64_t len,
+    int max_seconds
+) {
+    timespec_t start_ts, end_ts;
+    timespec_t t0, t1;
+    unsigned long total_time = 0, iter = 0;
+
+    *run_time= 0;
+    while (total_time < max_seconds * NANO) {
+        iter++;
+        clock_gettime(CLOCK_REALTIME, &start_ts);
+
+        clock_gettime(CLOCK_REALTIME, &t0);
+
+        blst_p1_affine *p_affine = malloc(len * sizeof(blst_p1_affine));
+        const blst_p1 *p_arg[2] = {p, NULL};
+        blst_p1s_to_affine(p_affine, p_arg, len);
+
+        blst_scalar *scalars = malloc(len * sizeof(blst_scalar));
+        for (int i = 0; i < len; i++) {
+            blst_scalar_from_fr(&scalars[i], &poly->coeffs[i]);
+        }
+
+        void *scratch = malloc(blst_p1s_mult_pippenger_scratch_sizeof(len));
+        const byte *scalars_arg[2] = {(byte *)scalars, NULL};
+        const blst_p1_affine *points_arg[2] = {p_affine, NULL};
+        g1_t out;
+        blst_p1s_mult_pippenger(&out, points_arg, len, scalars_arg, 256, scratch);
+
+        free(scratch);
+        free(p_affine);
+        free(scalars);
+
+        clock_gettime(CLOCK_REALTIME, &t1);
+        *run_time += tdiff_usec(t0, t1);
+
+        clock_gettime(CLOCK_REALTIME, &end_ts);
+        total_time += tdiff(start_ts, end_ts);
+    }
+    *run_time /= iter;
+}
+
 int main(int argc, char *argv[]) {
     int nsec = 0;
     int baseline_type = BENCH_BASELINE;
@@ -176,8 +231,10 @@ int main(int argc, char *argv[]) {
         nsec = atoi(argv[1]);
         if (!strcmp(argv[2], "baseline")) {
             baseline_type = BENCH_BASELINE;
+        } if (!strcmp(argv[2], "affine")) {
+            baseline_type = BENCH_AFFINE;
         } else {
-            printf("Invalid bench type: Usage: %s [test time in seconds > 0] [baseline]\n", argv[0]);
+            printf("Invalid bench type: Usage: %s [test time in seconds > 0] [baseline|affine]\n", argv[0]);
             exit(EXIT_FAILURE);
         }
         break;
@@ -204,8 +261,27 @@ int main(int argc, char *argv[]) {
                     run_time.interpolate_time, run_time.commit_time, run_time.eval_time,
                     run_time.compute_proof_time, run_time.check_proof_time);
         }
+    } else if (baseline_type == BENCH_AFFINE) {
+        FFTSettings fs;
+        KZGSettings ks;
+        unsigned long run_time;
+
+        printf("*** Benchmarking affine transform, %d second%s per test.\n", nsec, nsec == 1 ? "" : "s");
+        for (int scale = 1; scale <= 15; scale++) {
+            poly p;
+            uint64_t len = 1 << scale;
+
+            init_trusted_setup(&fs, &ks, scale);
+            assert(C_KZG_OK == new_poly(&p, fs.max_width));
+            run_bench_affine_transformation(&run_time, ks.secret_g1, &p, len, nsec);
+            free_kzg_settings(&ks);
+            free_fft_settings(&fs);
+            free_poly(&p);
+
+            printf("len = %5llu: g1->affine transform time = %6lu (usec/op)\n", len, run_time);
+        }
     } else {
-        printf("Bench type: Usage: %s [test time in seconds > 0] [baseline]\n", argv[0]);
+        printf("Bench type: Usage: %s [test time in seconds > 0] [baseline|affine]\n", argv[0]);
         exit(EXIT_FAILURE);
     }
 }

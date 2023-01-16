@@ -4,11 +4,14 @@
 #include <assert.h> // assert()
 #include <stdio.h>  // printf()
 #include <stdlib.h> // malloc(), free(), atoi()
+#include <string.h>
 #include <time.h>
 #include <unistd.h> // EXIT_SUCCESS/FAILURE
 #include "bench_util.h"
 #include "test_util.h"
 #include "c_kzg.h"
+
+#define BENCH_BASELINE  1
 
 // 32K * 32 bytes = 1 MB worth of data.
 const uint64_t MAX_FRS = 32 * 1024;
@@ -77,14 +80,14 @@ void init_trusted_setup(FFTSettings *fs, KZGSettings *ks, int scale) {
 }
 
 /*
- * Runs the benchmark for the specified time.
+ * Runs the baseline benchmark for the specified time.
  *
  * @param[out] run_time             Run time stats
  * @param[in]  data                 Polynomial eval
  * @param[in]  scale                log of polynomial length(1 more than the polynomial degree)
  * @param[in]  max_seconds          Test duration
 */
-void run_bench(
+void run_bench_baseline(
     run_time_t* run_time,
     fr_t* data,
     int scale,
@@ -160,6 +163,7 @@ void run_bench(
 
 int main(int argc, char *argv[]) {
     int nsec = 0;
+    int baseline_type = BENCH_BASELINE;
 
     switch (argc) {
     case 1:
@@ -168,26 +172,40 @@ int main(int argc, char *argv[]) {
     case 2:
         nsec = atoi(argv[1]);
         break;
+    case 3:
+        nsec = atoi(argv[1]);
+        if (!strcmp(argv[2], "baseline")) {
+            baseline_type = BENCH_BASELINE;
+        } else {
+            printf("Invalid bench type: Usage: %s [test time in seconds > 0] [baseline]\n", argv[0]);
+            exit(EXIT_FAILURE);
+        }
+        break;
     default:
         break;
     };
 
     if (nsec == 0) {
-        printf("Usage: %s [test time in seconds > 0]\n", argv[0]);
+        printf("Usage: %s [test time in seconds > 0] [baseline]\n", argv[0]);
         exit(EXIT_FAILURE);
     }
     fr_t *data = init_data(MAX_FRS);
 
-    printf("*** Benchmarking c_kzg, %d second%s per test.\n", nsec, nsec == 1 ? "" : "s");
-    run_time_t run_time;
-    run_bench(&run_time, data, 1, nsec);
-    run_bench(&run_time, data, 2, nsec);
-    for (int scale = 1; scale <= 15; scale++) {
-        run_bench(&run_time, data, scale, nsec);
-        printf("data = %7lu bytes(polynomial_len = %5lu): create-polynomial = %6lu, commit = %6lu, eval = %6lu, "
-                "create-witness = %6lu, verify = %6lu  (usec/op)\n",
-                run_time.data_bytes, run_time.polynomial_len,
-                run_time.interpolate_time, run_time.commit_time, run_time.eval_time,
-                run_time.compute_proof_time, run_time.check_proof_time);
+    if (baseline_type == BENCH_BASELINE) {
+        printf("*** Benchmarking baseline c_kzg, %d second%s per test.\n", nsec, nsec == 1 ? "" : "s");
+        run_time_t run_time;
+        run_bench_baseline(&run_time, data, 1, nsec);
+        run_bench_baseline(&run_time, data, 2, nsec);
+        for (int scale = 1; scale <= 15; scale++) {
+            run_bench_baseline(&run_time, data, scale, nsec);
+            printf("data = %7lu bytes(polynomial_len = %5lu): create-polynomial = %6lu, commit = %6lu, eval = %6lu, "
+                    "create-witness = %6lu, verify = %6lu  (usec/op)\n",
+                    run_time.data_bytes, run_time.polynomial_len,
+                    run_time.interpolate_time, run_time.commit_time, run_time.eval_time,
+                    run_time.compute_proof_time, run_time.check_proof_time);
+        }
+    } else {
+        printf("Bench type: Usage: %s [test time in seconds > 0] [baseline]\n", argv[0]);
+        exit(EXIT_FAILURE);
     }
 }

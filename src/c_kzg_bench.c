@@ -196,10 +196,12 @@ int main(int argc, char *argv[]) {
         run_time_t run_time;
         run_bench_baseline(&run_time, data, 1, nsec);
         run_bench_baseline(&run_time, data, 2, nsec);
+        printf("create-witness = create-quotient + commit-quotient\n");
+        printf("Measured times in microseconds/op\n");
         for (int scale = 1; scale <= 15; scale++) {
             run_bench_baseline(&run_time, data, scale, nsec);
             printf("data = %7lu bytes(polynomial_len = %5lu): create-polynomial = %6lu, commit = %6lu, eval = %6lu, "
-                    "create-witness = %6lu, verify = %6lu  (usec/op)\n",
+                    "create-witness = %6lu, verify = %6lu\n",
                     run_time.data_bytes, run_time.polynomial_len,
                     run_time.interpolate_time, run_time.commit_time, run_time.eval_time,
                     run_time.compute_proof_time, run_time.check_proof_time);
